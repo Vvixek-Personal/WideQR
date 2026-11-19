@@ -21,14 +21,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -53,6 +53,11 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.camera.CameraSessionState
+import com.example.ui.theme.InstrumentAccent
+import com.example.ui.theme.InstrumentBackground
+import com.example.ui.theme.InstrumentBorder
+import com.example.ui.theme.InstrumentSurface
+import com.example.ui.theme.InstrumentTextPrimary
 
 @Composable
 fun ScannerScreen(
@@ -79,6 +84,7 @@ fun ScannerScreen(
     }
     var hasRequestedPermissionOnce by remember { mutableStateOf(false) }
     var isPermanentlyDenied by remember { mutableStateOf(false) }
+    var isLifecycleResumed by remember { mutableStateOf(true) }
 
     val textureViewRef = remember { mutableStateOf<TextureView?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -163,6 +169,7 @@ fun ScannerScreen(
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_RESUME -> {
+                    isLifecycleResumed = true
                     val granted = ContextCompat.checkSelfPermission(
                         context,
                         Manifest.permission.CAMERA
@@ -176,6 +183,7 @@ fun ScannerScreen(
                     }
                 }
                 Lifecycle.Event.ON_PAUSE -> {
+                    isLifecycleResumed = false
                     viewModel.stopScannerPreview()
                 }
                 else -> Unit
@@ -203,28 +211,28 @@ fun ScannerScreen(
                 hostState = snackbarHostState,
                 modifier = Modifier
                     .navigationBarsPadding()
-                    .padding(bottom = 92.dp, start = 16.dp, end = 16.dp)
+                    .padding(bottom = 84.dp, start = 16.dp, end = 16.dp)
             ) { data ->
                 Surface(
-                    color = ScannerPalette.Surface,
-                    contentColor = ScannerPalette.TextPrimary,
-                    shape = RoundedCornerShape(14.dp),
-                    border = BorderStroke(1.dp, ScannerPalette.Border)
+                    color = InstrumentSurface,
+                    contentColor = InstrumentTextPrimary,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, InstrumentBorder)
                 ) {
                     Snackbar(
                         snackbarData = data,
-                        containerColor = ScannerPalette.Surface,
-                        contentColor = ScannerPalette.TextPrimary,
-                        actionColor = ScannerPalette.Accent
+                        containerColor = InstrumentSurface,
+                        contentColor = InstrumentTextPrimary,
+                        actionColor = InstrumentAccent
                     )
                 }
             }
         },
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        containerColor = ScannerPalette.Background
+        containerColor = InstrumentBackground
     ) { _ ->
         Box(modifier = Modifier.fillMaxSize()) {
-            // 1. Live physical ultra-wide Camera2 TextureView OR dark-first recovery screen
+            // 1. Full-bleed live physical ultra-wide Camera2 TextureView
             if (canStreamUltraWide) {
                 AndroidView(
                     factory = { ctx ->
@@ -235,80 +243,82 @@ fun ScannerScreen(
                     },
                     modifier = Modifier.fillMaxSize()
                 )
+            }
 
-                // Bounded reticle region prevents overlap with header or bottom controls across screen sizes
-                ScannerReticleOverlay(
-                    isScanning = isStreaming && !isGalleryDecoding,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .statusBarsPadding()
-                        .navigationBarsPadding()
-                        .padding(top = 76.dp, bottom = 148.dp, start = 20.dp, end = 20.dp)
-                )
-            } else {
-                ScannerRecoveryPanel(
-                    hasCameraPermission = hasCameraPermission,
-                    isPermanentlyDenied = isPermanentlyDenied,
-                    discoveryReport = discoveryReport,
-                    sessionState = sessionState,
-                    onRequestPermission = { permissionLauncher.launch(Manifest.permission.CAMERA) },
-                    onOpenAppSettings = {
-                        val intent = Intent(
-                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                            Uri.fromParts("package", context.packageName, null)
-                        ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
-                        context.startActivity(intent)
-                    },
+            // 2. Adaptive HUD column using safeDrawing insets and weighted center area
+            //    (no fixed top/bottom offsets so reticle and controls adapt to any screen or font scale)
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                ScannerTopHeader(
+                    isStreaming = isStreaming,
+                    isOpening = isOpening,
+                    hasError = hasErrorState,
                     onOpenDiagnostics = onOpenDiagnostics,
-                    onScanGallery = launchGalleryPicker,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .statusBarsPadding()
-                        .navigationBarsPadding()
-                        .padding(top = 76.dp, bottom = 92.dp, start = 20.dp, end = 20.dp)
+                    onOpenSettings = onOpenSettings,
+                    modifier = Modifier.fillMaxWidth()
                 )
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (canStreamUltraWide) {
+                        ScannerReticleOverlay(
+                            isScanning = isStreaming && !isGalleryDecoding && isLifecycleResumed,
+                            isInitializing = isOpening,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        ScannerRecoveryPanel(
+                            hasCameraPermission = hasCameraPermission,
+                            isPermanentlyDenied = isPermanentlyDenied,
+                            discoveryReport = discoveryReport,
+                            sessionState = sessionState,
+                            onRequestPermission = { permissionLauncher.launch(Manifest.permission.CAMERA) },
+                            onOpenAppSettings = {
+                                val intent = Intent(
+                                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                    Uri.fromParts("package", context.packageName, null)
+                                ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                                context.startActivity(intent)
+                            },
+                            onOpenDiagnostics = onOpenDiagnostics,
+                            onScanGallery = launchGalleryPicker,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                }
+
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (canStreamUltraWide) {
+                        ScannerHardwarePill(report = discoveryReport)
+                    }
+
+                    ScannerBottomToolbar(
+                        report = discoveryReport,
+                        sessionState = sessionState,
+                        hasCameraPermission = hasCameraPermission,
+                        isGalleryDecoding = isGalleryDecoding,
+                        onScanGallery = launchGalleryPicker,
+                        onToggleFlash = { viewModel.toggleTorch() }
+                    )
+                }
             }
 
             if (isGalleryDecoding) {
                 ScannerGalleryDecodingOverlay(modifier = Modifier.fillMaxSize())
-            }
-
-            // 2. Compact floating top header
-            ScannerTopHeader(
-                isStreaming = isStreaming,
-                isOpening = isOpening,
-                hasError = hasErrorState,
-                onOpenDiagnostics = onOpenDiagnostics,
-                onOpenSettings = onOpenSettings,
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
-            )
-
-            // 3. Compact real hardware verification pill + floating 3-part bottom toolbar
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                if (canStreamUltraWide) {
-                    ScannerHardwarePill(report = discoveryReport)
-                }
-
-                ScannerBottomToolbar(
-                    report = discoveryReport,
-                    sessionState = sessionState,
-                    hasCameraPermission = hasCameraPermission,
-                    isGalleryDecoding = isGalleryDecoding,
-                    onScanGallery = launchGalleryPicker,
-                    onToggleFlash = { viewModel.toggleTorch() }
-                )
             }
         }
     }

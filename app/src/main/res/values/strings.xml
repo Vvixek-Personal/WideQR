@@ -35,9 +35,14 @@
     <string name="scanner_status_decoding">Decoding…</string>
     <string name="scanner_status_standby">Standby</string>
     <string name="scanner_decoding_gallery">Decoding QR from image…</string>
-    <string name="scanner_badge_permission">PERMISSION REQUIRED</string>
-    <string name="scanner_badge_error">CAMERA ERROR</string>
-    <string name="scanner_badge_unavailable">HARDWARE LIMITED</string>
+    <string name="scanner_badge_permission">Permission required</string>
+    <string name="scanner_badge_permission_blocked">Permission blocked</string>
+    <string name="scanner_badge_error">Camera error</string>
+    <string name="scanner_badge_no_ultrawide">No ultra-wide lens</string>
+    <string name="scanner_badge_unavailable">Lens inaccessible</string>
+    <string name="scanner_permission_blocked_title">Enable Camera in Settings</string>
+    <string name="scanner_action_gallery_fallback">Scan QR from Gallery</string>
+    <string name="scanner_lens_label">Ultra-wide</string>
 
     <!-- Camera Permissions & Hardware Errors -->
     <string name="permission_title">Camera Permission Needed</string>
