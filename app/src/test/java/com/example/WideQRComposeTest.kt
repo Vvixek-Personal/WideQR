@@ -20,11 +20,19 @@ class WideQRComposeTest {
     val composeTestRule = createAndroidComposeRule<MainActivity>()
 
     @Test
-    fun `scanner launches and navigates to settings and diagnostics`() {
+    fun `scanner launches and navigates directly to diagnostics and settings`() {
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithText("WideQR").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("gallery_import_button").assertIsDisplayed()
 
-        // Navigate to Settings
+        // Navigate directly to Camera Diagnostics from Scanner top bar
+        composeTestRule.onNodeWithTag("diagnostics_button").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Camera Diagnostics").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("diagnostics_back_button").performClick()
+        composeTestRule.waitForIdle()
+
+        // Navigate to Settings from Scanner top bar
         composeTestRule.onNodeWithTag("settings_button").performClick()
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithText("Appearance").assertIsDisplayed()
@@ -41,5 +49,14 @@ class WideQRComposeTest {
         composeTestRule.onNodeWithTag("settings_back_button").performClick()
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithText("WideQR").assertIsDisplayed()
+    }
+
+    @Test
+    fun `scanner shows permission recovery card and gallery fallback when camera permission is missing`() {
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("camera_permission_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("fallback_gallery_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("gallery_import_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("flash_toggle_button").assertDoesNotExist()
     }
 }

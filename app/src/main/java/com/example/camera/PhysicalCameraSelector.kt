@@ -33,8 +33,9 @@ object PhysicalCameraSelector {
     }
 
     /**
-     * Selects YUV_420_888 analysis resolution: sharp enough for dense UPI QR codes
-     * through an ultra-wide lens (~1280x960 or 1280x720), capped for low RAM/CPU overhead.
+     * Selects the lowest practical YUV_420_888 analysis resolution that still reliably resolves
+     * dense UPI QR codes through an ultra-wide lens (~960x720 or 800x600), cutting per-frame
+     * ML Kit pixel work by ~44-61% compared to 1280x960 on 4 GB RAM devices.
      */
     fun chooseAnalysisSize(
         supportedYuvSizes: List<Pair<Int, Int>>,
@@ -44,13 +45,15 @@ object PhysicalCameraSelector {
 
         val previewAspect = previewSize.width.toFloat() / previewSize.height.toFloat().coerceAtLeast(1f)
         val candidates = supportedYuvSizes.filter { (w, h) ->
-            w in 640..1600 && h in 480..1200
-        }.ifEmpty { supportedYuvSizes }
+            w in 640..1280 && h in 480..768
+        }.ifEmpty {
+            supportedYuvSizes.filter { (w, h) -> w >= 640 && h >= 480 }.ifEmpty { supportedYuvSizes }
+        }
 
         val best = candidates.minByOrNull { (w, h) ->
             val ratio = w.toFloat() / h.toFloat().coerceAtLeast(1f)
             val aspectPenalty = abs(ratio - previewAspect) * 10f
-            val targetPixels = 1280f * 960f
+            val targetPixels = 960f * 720f
             val sizePenalty = abs((w * h) - targetPixels) / targetPixels
             aspectPenalty + sizePenalty
         } ?: supportedYuvSizes.first()

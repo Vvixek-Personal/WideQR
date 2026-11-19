@@ -51,15 +51,13 @@ class WideQRViewModel(application: Application) : AndroidViewModel(application) 
             rotationDegrees = rotation,
             onDone = onDone,
             onQrDetected = { rawPayload ->
-                viewModelScope.launch {
-                    val lensName = discoveryReport.value.selectedUltraWide?.let {
-                        "Ultra-wide camera (ID: ${it.displayId})"
-                    } ?: "Ultra-wide camera"
-                    val result = ScanResultProcessor.process(rawPayload, lensName)
-                    _latestScanResult.value = result
-                    _redirectState.value = RedirectInspectionState.Idle
-                    _scanDetectedEvents.emit(result)
-                }
+                val lensName = discoveryReport.value.selectedUltraWide?.let {
+                    "Ultra-wide camera (ID: ${it.displayId})"
+                } ?: "Ultra-wide camera"
+                val result = ScanResultProcessor.process(rawPayload, lensName)
+                _latestScanResult.value = result
+                _redirectState.value = RedirectInspectionState.Idle
+                _scanDetectedEvents.tryEmit(result)
             }
         )
     }
@@ -99,6 +97,7 @@ class WideQRViewModel(application: Application) : AndroidViewModel(application) 
         val report = cameraRepository.refreshHardwareDiscovery()
         val selected = report.selectedUltraWide
         if (report.status.isUsableForScanner && selected != null) {
+            qrDecoder.warmUp()
             qrDecoder.resume()
             scannerCameraController.startCamera(selected, textureView)
         } else {

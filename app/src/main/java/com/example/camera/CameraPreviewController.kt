@@ -55,6 +55,8 @@ class CameraPreviewController(
 
     private var backgroundThread: HandlerThread? = null
     private var backgroundHandler: Handler? = null
+    private var analysisThread: HandlerThread? = null
+    private var analysisHandler: Handler? = null
 
     private var cameraDevice: CameraDevice? = null
     private var captureSession: CameraCaptureSession? = null
@@ -65,6 +67,8 @@ class CameraPreviewController(
     private var currentCamera: CameraHardwareInfo? = null
     private var currentTextureView: TextureView? = null
     private var currentPreviewSize: Size = Size(1280, 960)
+    @Volatile
+    private var cachedImageRotationDegrees: Int = 0
     private var torchEnabled: Boolean = false
     private val isClosing = AtomicBoolean(false)
 
@@ -201,12 +205,13 @@ class CameraPreviewController(
 
         var analysisSurface: Surface? = null
         if (onImageFrame != null) {
+            cachedImageRotationDegrees = computeImageRotationDegrees(cameraInfo)
             val yuvSize = PhysicalCameraSelector.chooseAnalysisSize(cameraInfo.yuvSizes, previewSize)
             val reader = ImageReader.newInstance(
                 yuvSize.width,
                 yuvSize.height,
                 ImageFormat.YUV_420_888,
-                2
+                3
             )
             reader.setOnImageAvailableListener({ r ->
                 val image = try {
@@ -215,15 +220,14 @@ class CameraPreviewController(
                     null
                 }
                 if (image != null) {
-                    val rotation = computeImageRotationDegrees(cameraInfo)
-                    onImageFrame.invoke(image, rotation) {
+                    onImageFrame.invoke(image, cachedImageRotationDegrees) {
                         try {
                             image.close()
                         } catch (_: Exception) {
                         }
                     }
                 }
-            }, handler)
+            }, analysisHandler ?: handler)
             imageReader = reader
             analysisSurface = reader.surface
             surfaces.add(reader.surface)
@@ -248,7 +252,7 @@ class CameraPreviewController(
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && cameraInfo.supportsDistortionCorrection) {
                     set(
                         CaptureRequest.DISTORTION_CORRECTION_MODE,
-                        CameraMetadata.DISTORTION_CORRECTION_MODE_HIGH_QUALITY
+                        CameraMetadata.DISTORTION_CORRECTION_MODE_FAST
                     )
                 }
             }
@@ -347,6 +351,7 @@ class CameraPreviewController(
     fun refreshOrientation() {
         val tv = currentTextureView ?: return
         val info = currentCamera ?: return
+        cachedImageRotationDegrees = computeImageRotationDegrees(info)
         tv.post {
             configureTextureTransform(tv, currentPreviewSize, info)
         }
@@ -395,21 +400,38 @@ class CameraPreviewController(
     }
 
     private fun startBackgroundThread() {
-        if (backgroundThread != null) return
-        val thread = HandlerThread("WideQRCameraThread").apply { start() }
-        backgroundThread = thread
-        backgroundHandler = Handler(thread.looper)
+        if (backgroundThread == null) {
+            val thread = HandlerThread("WideQRCameraThread").apply { start() }
+            backgroundThread = thread
+            backgroundHandler = Handler(thread.looper)
+        }
+        if (onImageFrame != null && analysisThread == null) {
+            val aThread = HandlerThread("WideQRAnalysisThread").apply { start() }
+            analysisThread = aThread
+            analysisHandler = Handler(aThread.looper)
+        }
     }
 
     private fun stopBackgroundThread() {
-        val thread = backgroundThread ?: return
-        thread.quitSafely()
-        try {
-            thread.join(350)
-        } catch (_: InterruptedException) {
+        backgroundThread?.let { thread ->
+            thread.quitSafely()
+            try {
+                thread.join(350)
+            } catch (_: InterruptedException) {
+            }
         }
         backgroundThread = null
         backgroundHandler = null
+
+        analysisThread?.let { thread ->
+            thread.quitSafely()
+            try {
+                thread.join(350)
+            } catch (_: InterruptedException) {
+            }
+        }
+        analysisThread = null
+        analysisHandler = null
     }
 
     private fun computeImageRotationDegrees(cameraInfo: CameraHardwareInfo): Int {

@@ -29,6 +29,15 @@
     <string name="cd_flash_on">Turn flashlight off</string>
     <string name="cd_flash_off">Turn flashlight on</string>
     <string name="cd_viewfinder_frame">QR code alignment frame</string>
+    <string name="scanner_instruction">Align QR code within frame</string>
+    <string name="scanner_status_scanning">Scanning</string>
+    <string name="scanner_status_opening">Starting lens…</string>
+    <string name="scanner_status_decoding">Decoding…</string>
+    <string name="scanner_status_standby">Standby</string>
+    <string name="scanner_decoding_gallery">Decoding QR from image…</string>
+    <string name="scanner_badge_permission">PERMISSION REQUIRED</string>
+    <string name="scanner_badge_error">CAMERA ERROR</string>
+    <string name="scanner_badge_unavailable">HARDWARE LIMITED</string>
 
     <!-- Camera Permissions & Hardware Errors -->
     <string name="permission_title">Camera Permission Needed</string>

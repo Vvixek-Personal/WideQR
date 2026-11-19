@@ -6,19 +6,29 @@ import android.graphics.BitmapFactory
 import android.media.Image
 import android.net.Uri
 import android.os.SystemClock
+import android.util.Log
+import com.example.BuildConfig
 import com.google.mlkit.vision.barcode.BarcodeScanner
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
 import kotlinx.coroutines.suspendCancellableCoroutine
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 
 class QRDecoder {
 
+    private val callbackExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "WideQRDecodeCallback").apply {
+            priority = Thread.NORM_PRIORITY + 1
+        }
+    }
+
     private val options = BarcodeScannerOptions.Builder()
         .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+        .setExecutor(callbackExecutor)
         .build()
 
     @Volatile
@@ -37,8 +47,18 @@ class QRDecoder {
 
     private val isProcessingFrame = AtomicBoolean(false)
     private val isPaused = AtomicBoolean(false)
+
     @Volatile
-    private var lastAnalysisTimestampMs = 0L
+    var lastDecodeLatencyMs: Long = -1L
+        private set
+
+    fun warmUp() {
+        callbackExecutor.execute {
+            getOrCreateScanner()
+        }
+    }
+
+    fun canAcceptFrame(): Boolean = !isPaused.get() && !isProcessingFrame.get()
 
     fun pause() {
         isPaused.set(true)
@@ -54,11 +74,7 @@ class QRDecoder {
         onDone: () -> Unit,
         onQrDetected: (String) -> Unit
     ) {
-        val now = SystemClock.elapsedRealtime()
-        if (isPaused.get() ||
-            (now - lastAnalysisTimestampMs) < MIN_FRAME_INTERVAL_MS ||
-            !isProcessingFrame.compareAndSet(false, true)
-        ) {
+        if (isPaused.get() || !isProcessingFrame.compareAndSet(false, true)) {
             onDone()
             return
         }
@@ -70,7 +86,7 @@ class QRDecoder {
             return
         }
 
-        lastAnalysisTimestampMs = now
+        val startMs = SystemClock.elapsedRealtime()
         val inputImage = try {
             InputImage.fromMediaImage(image, rotationDegrees)
         } catch (_: Exception) {
@@ -80,14 +96,22 @@ class QRDecoder {
         }
 
         activeScanner.process(inputImage)
-            .addOnSuccessListener { barcodes ->
-                val raw = barcodes.firstNotNullOfOrNull { it.rawValue?.takeIf { s -> s.isNotBlank() } }
-                if (raw != null && !isPaused.get()) {
-                    isPaused.set(true)
-                    onQrDetected(raw)
+            .addOnSuccessListener(callbackExecutor) { barcodes ->
+                lastDecodeLatencyMs = SystemClock.elapsedRealtime() - startMs
+                if (barcodes.isNotEmpty()) {
+                    val raw = barcodes.firstNotNullOfOrNull {
+                        it.rawValue?.takeIf { s -> s.isNotBlank() }
+                    }
+                    if (raw != null && isPaused.compareAndSet(false, true)) {
+                        if (BuildConfig.DEBUG) {
+                            Log.d("WideQRPerf", "QR detected in ${lastDecodeLatencyMs}ms")
+                        }
+                        onQrDetected(raw)
+                    }
                 }
             }
-            .addOnCompleteListener {
+            .addOnCompleteListener(callbackExecutor) {
+                // Release Image immediately on background executor without waiting for Main thread
                 isProcessingFrame.set(false)
                 onDone()
             }
@@ -106,13 +130,13 @@ class QRDecoder {
 
             val value = suspendCancellableCoroutine<String?> { cont ->
                 activeScanner.process(inputImage)
-                    .addOnSuccessListener { barcodes ->
+                    .addOnSuccessListener(callbackExecutor) { barcodes ->
                         val raw = barcodes.firstNotNullOfOrNull {
                             it.rawValue?.takeIf { s -> s.isNotBlank() }
                         }
                         if (cont.isActive) cont.resume(raw)
                     }
-                    .addOnFailureListener {
+                    .addOnFailureListener(callbackExecutor) {
                         if (cont.isActive) cont.resume(null)
                     }
             }
@@ -156,10 +180,13 @@ class QRDecoder {
             scannerInstance = null
         } catch (_: Exception) {
         }
+        try {
+            callbackExecutor.shutdown()
+        } catch (_: Exception) {
+        }
     }
 
     companion object {
-        private const val MIN_FRAME_INTERVAL_MS = 90L
         private const val MAX_GALLERY_DIMENSION_PX = 1600
     }
 }
