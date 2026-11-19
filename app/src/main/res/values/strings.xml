@@ -1,0 +1,117 @@
+<resources>
+    <string name="app_name">WideQR</string>
+
+    <!-- Navigation & Screen Titles -->
+    <string name="title_scanner">WideQR</string>
+    <string name="title_result">Scan Result</string>
+    <string name="title_diagnostics">Camera Diagnostics</string>
+    <string name="title_settings">Settings</string>
+    <string name="cd_back">Navigate back</string>
+    <string name="cd_open_diagnostics">Open camera hardware diagnostics</string>
+    <string name="cd_open_settings">Open settings</string>
+
+    <!-- Camera Verification States -->
+    <string name="status_verified_ultrawide">Hardware verified</string>
+    <string name="status_likely_ultrawide">Likely ultra-wide</string>
+    <string name="status_wide_unverified">Wide detected — unverified</string>
+    <string name="status_ultrawide_not_accessible">Not accessible</string>
+    <string name="status_no_ultrawide_found">No ultra-wide found</string>
+    <string name="status_camera_access_error">Camera error</string>
+
+    <!-- Scanner Controls -->
+    <string name="action_scan_gallery">Gallery</string>
+    <string name="action_toggle_flash">Flashlight</string>
+    <string name="action_rescan">Scan Another</string>
+    <string name="action_inspect_hardware">Inspect Camera Hardware</string>
+    <string name="action_allow_camera">Allow Camera Access</string>
+    <string name="action_open_app_settings">Open App Settings</string>
+    <string name="cd_scan_gallery">Scan QR code from gallery image</string>
+    <string name="cd_flash_on">Turn flashlight off</string>
+    <string name="cd_flash_off">Turn flashlight on</string>
+    <string name="cd_viewfinder_frame">QR code alignment frame</string>
+
+    <!-- Camera Permissions & Hardware Errors -->
+    <string name="permission_title">Camera Permission Needed</string>
+    <string name="permission_rationale">WideQR needs camera access to inspect your device lenses and scan QR codes locally using your physical ultra-wide camera.</string>
+    <string name="permission_denied_permanently">Camera permission was denied. Enable Camera access in Android app settings to scan with the ultra-wide lens, or scan an image from your gallery.</string>
+    <string name="error_camera_in_use">Camera is currently used by another app. Close the other app and try again.</string>
+    <string name="error_camera_unavailable">Camera hardware is temporarily unavailable.</string>
+    <string name="error_camera_disconnected">Camera was disconnected.</string>
+    <string name="error_gallery_no_qr">Could not find a readable QR code in that image.</string>
+    <string name="error_gallery_read_failed">Could not open the selected image.</string>
+
+    <!-- Result Screen Labels -->
+    <string name="label_source">Scanned with</string>
+    <string name="label_raw_payload">Raw QR Data</string>
+    <string name="action_copy">Copy</string>
+    <string name="copied_to_clipboard">Copied to clipboard</string>
+
+    <!-- URL / Redirect Inspection -->
+    <string name="label_qr_link">QR LINK</string>
+    <string name="label_domain">DOMAIN</string>
+    <string name="label_protocol">PROTOCOL</string>
+    <string name="label_destination">DESTINATION</string>
+    <string name="action_open_link">Open Link</string>
+    <string name="action_inspect_link">Inspect Redirects</string>
+    <string name="action_copy_link">Copy Link</string>
+    <string name="redirect_disclosure">Inspecting redirects sends a lightweight header request to check where this link points without running scripts or downloading page content.</string>
+    <string name="redirect_offline_error">Destination could not be checked. Internet connection may be unavailable.</string>
+    <string name="redirect_failed_fallback">Link inspection failed. You can still view the original URL.</string>
+    <string name="suspicious_link_confirm_title">Open Suspicious Link?</string>
+    <string name="suspicious_link_confirm_action">Open Anyway</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="no_browser_found">No web browser app was found to open this link.</string>
+
+    <!-- UPI Handling -->
+    <string name="label_pay_to">PAY TO</string>
+    <string name="label_upi_id">UPI ID</string>
+    <string name="label_amount">AMOUNT</string>
+    <string name="label_note">NOTE</string>
+    <string name="label_merchant_code">MERCHANT CODE</string>
+    <string name="label_reference">REFERENCE</string>
+    <string name="amount_entered_in_app">Entered in payment app</string>
+    <string name="upi_security_notice">Final payment confirmation and PIN entry occur strictly inside your chosen payment app.</string>
+    <string name="action_open_upi_app">Open UPI App</string>
+    <string name="action_copy_upi_id">Copy UPI ID</string>
+    <string name="action_copy_payment_link">Copy Payment Link</string>
+    <string name="action_copy_details">Copy Details</string>
+    <string name="action_retry">Retry</string>
+    <string name="no_upi_app_found">No compatible UPI payment app found.</string>
+
+    <!-- Other QR Types -->
+    <string name="label_wifi_ssid">NETWORK NAME</string>
+    <string name="label_wifi_security">SECURITY</string>
+    <string name="label_wifi_password">PASSWORD</string>
+    <string name="action_copy_credentials">Copy Credentials</string>
+    <string name="action_copy_password">Copy Password</string>
+    <string name="label_phone_number">PHONE NUMBER</string>
+    <string name="action_call">Call</string>
+    <string name="action_copy_number">Copy Number</string>
+    <string name="label_email_address">EMAIL ADDRESS</string>
+    <string name="label_subject">SUBJECT</string>
+    <string name="label_message">MESSAGE</string>
+    <string name="action_open_email">Open Email App</string>
+    <string name="action_open_sms">Open Messaging App</string>
+    <string name="action_save_contact">Save Contact</string>
+    <string name="save_contact_confirm_title">Open Contacts to Save?</string>
+    <string name="save_contact_confirm_body">Your Contacts app will open with these details prefilled so you can review and save.</string>
+    <string name="action_continue">Continue</string>
+
+    <!-- Diagnostics -->
+    <string name="diagnostics_subtitle">Real Camera2 hardware inspection and live lens verification</string>
+    <string name="action_refresh_hardware">Re-scan Cameras</string>
+    <string name="action_test_preview">Test Live Preview</string>
+    <string name="action_stop_preview">Stop Test Preview</string>
+
+    <!-- Settings -->
+    <string name="settings_theme">Appearance</string>
+    <string name="theme_system">System default</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="settings_camera_diagnostics">Camera Diagnostics</string>
+    <string name="settings_camera_diagnostics_desc">Inspect Camera2 physical IDs, focal lengths, and sensor metadata</string>
+    <string name="settings_privacy">Privacy</string>
+    <string name="settings_privacy_desc">All QR decoding runs locally on your device. Camera frames are never uploaded, no scan history is saved, and there are no ads, accounts, or analytics. Network requests happen only if you tap Inspect Redirects or open a link.</string>
+    <string name="settings_about">About WideQR</string>
+    <string name="settings_about_desc">WideQR prioritizes genuine physical ultra-wide lens access via Camera2 without digital zoom tricks. On devices whose firmware restricts secondary sensors from third-party apps, WideQR reports that limitation honestly.</string>
+</resources>

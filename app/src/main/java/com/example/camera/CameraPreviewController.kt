@@ -1,0 +1,530 @@
+package com.example.camera
+
+import android.annotation.SuppressLint
+import android.content.Context
+import android.graphics.ImageFormat
+import android.graphics.Matrix
+import android.graphics.RectF
+import android.graphics.SurfaceTexture
+import android.hardware.camera2.CameraAccessException
+import android.hardware.camera2.CameraCaptureSession
+import android.hardware.camera2.CameraDevice
+import android.hardware.camera2.CameraManager
+import android.hardware.camera2.CameraMetadata
+import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.params.OutputConfiguration
+import android.hardware.camera2.params.SessionConfiguration
+import android.media.Image
+import android.media.ImageReader
+import android.os.Build
+import android.os.Handler
+import android.os.HandlerThread
+import android.util.Size
+import android.view.Surface
+import android.view.TextureView
+import android.view.WindowManager
+import com.example.BuildConfig
+import com.example.models.CameraHardwareInfo
+import com.example.models.LensAccessMethod
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import java.util.concurrent.Executor
+import java.util.concurrent.atomic.AtomicBoolean
+
+sealed interface CameraSessionState {
+    data object Idle : CameraSessionState
+    data object Opening : CameraSessionState
+    data class Streaming(
+        val cameraInfo: CameraHardwareInfo,
+        val previewSize: Size,
+        val isTorchEnabled: Boolean
+    ) : CameraSessionState
+
+    data class Error(
+        val message: String,
+        val isAccessLimitation: Boolean = false
+    ) : CameraSessionState
+}
+
+class CameraPreviewController(
+    private val context: Context,
+    private val onImageFrame: ((image: Image, rotationDegrees: Int, onDone: () -> Unit) -> Unit)? = null
+) {
+    private val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as? CameraManager
+
+    private var backgroundThread: HandlerThread? = null
+    private var backgroundHandler: Handler? = null
+
+    private var cameraDevice: CameraDevice? = null
+    private var captureSession: CameraCaptureSession? = null
+    private var previewRequestBuilder: CaptureRequest.Builder? = null
+    private var imageReader: ImageReader? = null
+    private var previewSurface: Surface? = null
+
+    private var currentCamera: CameraHardwareInfo? = null
+    private var currentTextureView: TextureView? = null
+    private var currentPreviewSize: Size = Size(1280, 960)
+    private var torchEnabled: Boolean = false
+    private val isClosing = AtomicBoolean(false)
+
+    private val _sessionState = MutableStateFlow<CameraSessionState>(CameraSessionState.Idle)
+    val sessionState: StateFlow<CameraSessionState> = _sessionState.asStateFlow()
+
+    @SuppressLint("MissingPermission")
+    fun startCamera(
+        cameraInfo: CameraHardwareInfo,
+        textureView: TextureView
+    ) {
+        val manager = cameraManager ?: run {
+            _sessionState.value = CameraSessionState.Error("Camera service is unavailable.")
+            return
+        }
+
+        if (!cameraInfo.canOpenForPreview) {
+            _sessionState.value = CameraSessionState.Error(
+                message = "Selected lens (${cameraInfo.displayId}) is not openable through Camera2.",
+                isAccessLimitation = true
+            )
+            return
+        }
+
+        closeCamera()
+        isClosing.set(false)
+        currentCamera = cameraInfo
+        currentTextureView = textureView
+        torchEnabled = false
+        _sessionState.value = CameraSessionState.Opening
+
+        startBackgroundThread()
+
+        if (textureView.isAvailable) {
+            openCameraDevice(manager, cameraInfo, textureView)
+        } else {
+            textureView.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
+                    if (!isClosing.get() && currentCamera?.displayId == cameraInfo.displayId) {
+                        openCameraDevice(manager, cameraInfo, textureView)
+                    }
+                }
+
+                override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
+                    configureTextureTransform(textureView, currentPreviewSize, cameraInfo)
+                }
+
+                override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
+                    return true
+                }
+
+                override fun onSurfaceTextureUpdated(surface: SurfaceTexture) = Unit
+            }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun openCameraDevice(
+        manager: CameraManager,
+        cameraInfo: CameraHardwareInfo,
+        textureView: TextureView
+    ) {
+        val handler = backgroundHandler ?: return
+        try {
+            manager.openCamera(
+                cameraInfo.openCameraId,
+                object : CameraDevice.StateCallback() {
+                    override fun onOpened(camera: CameraDevice) {
+                        if (isClosing.get()) {
+                            camera.close()
+                            return
+                        }
+                        cameraDevice = camera
+                        createCameraPreviewSession(camera, cameraInfo, textureView)
+                    }
+
+                    override fun onDisconnected(camera: CameraDevice) {
+                        camera.close()
+                        cameraDevice = null
+                        _sessionState.value = CameraSessionState.Error(
+                            "Camera was disconnected."
+                        )
+                    }
+
+                    override fun onError(camera: CameraDevice, error: Int) {
+                        camera.close()
+                        cameraDevice = null
+                        val (msg, limitation) = mapCameraError(error)
+                        _sessionState.value = CameraSessionState.Error(msg, limitation)
+                    }
+                },
+                handler
+            )
+        } catch (e: SecurityException) {
+            _sessionState.value = CameraSessionState.Error(
+                "Camera permission is required to scan QR codes."
+            )
+        } catch (e: CameraAccessException) {
+            logDebug("CameraAccessException opening ${cameraInfo.openCameraId}: ${e.message}")
+            _sessionState.value = CameraSessionState.Error(
+                "Camera hardware is currently unavailable.",
+                isAccessLimitation = true
+            )
+        } catch (e: IllegalArgumentException) {
+            logDebug("IllegalArgumentException opening ${cameraInfo.openCameraId}: ${e.message}")
+            _sessionState.value = CameraSessionState.Error(
+                "Ultra-wide camera ID is not accepted by this device's Camera2 driver.",
+                isAccessLimitation = true
+            )
+        }
+    }
+
+    private fun createCameraPreviewSession(
+        camera: CameraDevice,
+        cameraInfo: CameraHardwareInfo,
+        textureView: TextureView
+    ) {
+        val handler = backgroundHandler ?: return
+        val surfaceTexture = textureView.surfaceTexture ?: run {
+            _sessionState.value = CameraSessionState.Error("Preview surface is not ready.")
+            return
+        }
+
+        val previewSize = PhysicalCameraSelector.choosePreviewSize(cameraInfo.previewSizes)
+        currentPreviewSize = previewSize
+        surfaceTexture.setDefaultBufferSize(previewSize.width, previewSize.height)
+        textureView.post {
+            configureTextureTransform(textureView, previewSize, cameraInfo)
+        }
+
+        val pSurface = Surface(surfaceTexture)
+        previewSurface = pSurface
+        val surfaces = mutableListOf(pSurface)
+
+        var analysisSurface: Surface? = null
+        if (onImageFrame != null) {
+            val yuvSize = PhysicalCameraSelector.chooseAnalysisSize(cameraInfo.yuvSizes, previewSize)
+            val reader = ImageReader.newInstance(
+                yuvSize.width,
+                yuvSize.height,
+                ImageFormat.YUV_420_888,
+                2
+            )
+            reader.setOnImageAvailableListener({ r ->
+                val image = try {
+                    r.acquireLatestImage()
+                } catch (_: IllegalStateException) {
+                    null
+                }
+                if (image != null) {
+                    val rotation = computeImageRotationDegrees(cameraInfo)
+                    onImageFrame.invoke(image, rotation) {
+                        try {
+                            image.close()
+                        } catch (_: Exception) {
+                        }
+                    }
+                }
+            }, handler)
+            imageReader = reader
+            analysisSurface = reader.surface
+            surfaces.add(reader.surface)
+        }
+
+        try {
+            val builder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+                addTarget(pSurface)
+                analysisSurface?.let { addTarget(it) }
+                set(
+                    CaptureRequest.CONTROL_MODE,
+                    CameraMetadata.CONTROL_MODE_AUTO
+                )
+                set(
+                    CaptureRequest.CONTROL_AF_MODE,
+                    PhysicalCameraSelector.chooseAfMode(cameraInfo)
+                )
+                set(
+                    CaptureRequest.CONTROL_AE_MODE,
+                    CameraMetadata.CONTROL_AE_MODE_ON
+                )
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && cameraInfo.supportsDistortionCorrection) {
+                    set(
+                        CaptureRequest.DISTORTION_CORRECTION_MODE,
+                        CameraMetadata.DISTORTION_CORRECTION_MODE_HIGH_QUALITY
+                    )
+                }
+            }
+            previewRequestBuilder = builder
+
+            val sessionCallback = object : CameraCaptureSession.StateCallback() {
+                override fun onConfigured(session: CameraCaptureSession) {
+                    if (isClosing.get() || cameraDevice == null) {
+                        session.close()
+                        return
+                    }
+                    captureSession = session
+                    try {
+                        session.setRepeatingRequest(builder.build(), null, handler)
+                        _sessionState.value = CameraSessionState.Streaming(
+                            cameraInfo = cameraInfo,
+                            previewSize = previewSize,
+                            isTorchEnabled = torchEnabled
+                        )
+                    } catch (e: CameraAccessException) {
+                        logDebug("setRepeatingRequest failed: ${e.message}")
+                        _sessionState.value = CameraSessionState.Error(
+                            "Could not start camera preview stream."
+                        )
+                    }
+                }
+
+                override fun onConfigureFailed(session: CameraCaptureSession) {
+                    val isPhysicalSub = cameraInfo.accessMethod == LensAccessMethod.LOGICAL_PHYSICAL_STREAM
+                    val msg = if (isPhysicalSub) {
+                        "Device rejected physical ultra-wide stream configuration inside logical camera ${cameraInfo.openCameraId}."
+                    } else {
+                        "Failed to configure camera preview session."
+                    }
+                    _sessionState.value = CameraSessionState.Error(
+                        message = msg,
+                        isAccessLimitation = isPhysicalSub
+                    )
+                }
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val outputConfigs = surfaces.map { surface ->
+                    OutputConfiguration(surface).apply {
+                        if (cameraInfo.accessMethod == LensAccessMethod.LOGICAL_PHYSICAL_STREAM &&
+                            cameraInfo.physicalCameraId != null
+                        ) {
+                            setPhysicalCameraId(cameraInfo.physicalCameraId)
+                        }
+                    }
+                }
+                val executor = Executor { command -> handler.post(command) }
+                val sessionConfig = SessionConfiguration(
+                    SessionConfiguration.SESSION_REGULAR,
+                    outputConfigs,
+                    executor,
+                    sessionCallback
+                )
+                camera.createCaptureSession(sessionConfig)
+            } else {
+                @Suppress("DEPRECATION")
+                camera.createCaptureSession(surfaces, sessionCallback, handler)
+            }
+        } catch (e: Exception) {
+            logDebug("Failed creating capture session: ${e.message}")
+            _sessionState.value = CameraSessionState.Error(
+                "Ultra-wide camera stream could not be initialized.",
+                isAccessLimitation = true
+            )
+        }
+    }
+
+    fun setTorchEnabled(enabled: Boolean) {
+        val info = currentCamera ?: return
+        if (!info.hasFlashUnit) return
+        val session = captureSession ?: return
+        val builder = previewRequestBuilder ?: return
+        val handler = backgroundHandler ?: return
+
+        torchEnabled = enabled
+        try {
+            builder.set(
+                CaptureRequest.FLASH_MODE,
+                if (enabled) CameraMetadata.FLASH_MODE_TORCH else CameraMetadata.FLASH_MODE_OFF
+            )
+            session.setRepeatingRequest(builder.build(), null, handler)
+            val current = _sessionState.value
+            if (current is CameraSessionState.Streaming) {
+                _sessionState.value = current.copy(isTorchEnabled = enabled)
+            }
+        } catch (e: Exception) {
+            logDebug("Torch toggle failed: ${e.message}")
+        }
+    }
+
+    fun refreshOrientation() {
+        val tv = currentTextureView ?: return
+        val info = currentCamera ?: return
+        tv.post {
+            configureTextureTransform(tv, currentPreviewSize, info)
+        }
+    }
+
+    fun closeCamera() {
+        isClosing.set(true)
+        try {
+            if (torchEnabled) {
+                previewRequestBuilder?.set(CaptureRequest.FLASH_MODE, CameraMetadata.FLASH_MODE_OFF)
+                previewRequestBuilder?.let { captureSession?.setRepeatingRequest(it.build(), null, null) }
+            }
+        } catch (_: Exception) {
+        }
+        torchEnabled = false
+
+        try {
+            captureSession?.close()
+        } catch (_: Exception) {
+        }
+        captureSession = null
+        previewRequestBuilder = null
+
+        try {
+            cameraDevice?.close()
+        } catch (_: Exception) {
+        }
+        cameraDevice = null
+
+        try {
+            imageReader?.close()
+        } catch (_: Exception) {
+        }
+        imageReader = null
+
+        try {
+            previewSurface?.release()
+        } catch (_: Exception) {
+        }
+        previewSurface = null
+
+        currentCamera = null
+        currentTextureView = null
+        stopBackgroundThread()
+        _sessionState.value = CameraSessionState.Idle
+    }
+
+    private fun startBackgroundThread() {
+        if (backgroundThread != null) return
+        val thread = HandlerThread("WideQRCameraThread").apply { start() }
+        backgroundThread = thread
+        backgroundHandler = Handler(thread.looper)
+    }
+
+    private fun stopBackgroundThread() {
+        val thread = backgroundThread ?: return
+        thread.quitSafely()
+        try {
+            thread.join(350)
+        } catch (_: InterruptedException) {
+        }
+        backgroundThread = null
+        backgroundHandler = null
+    }
+
+    private fun computeImageRotationDegrees(cameraInfo: CameraHardwareInfo): Int {
+        val displayRotation = getDisplayRotationDegrees()
+        return if (cameraInfo.lensFacing == CameraMetadata.LENS_FACING_FRONT) {
+            (cameraInfo.sensorOrientationDeg + displayRotation) % 360
+        } else {
+            (cameraInfo.sensorOrientationDeg - displayRotation + 360) % 360
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun getDisplayRotationDegrees(): Int {
+        val wm = context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+        val rotation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                context.display?.rotation ?: Surface.ROTATION_0
+            } catch (_: UnsupportedOperationException) {
+                wm?.defaultDisplay?.rotation ?: Surface.ROTATION_0
+            }
+        } else {
+            wm?.defaultDisplay?.rotation ?: Surface.ROTATION_0
+        }
+        return when (rotation) {
+            Surface.ROTATION_90 -> 90
+            Surface.ROTATION_180 -> 180
+            Surface.ROTATION_270 -> 270
+            else -> 0
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun configureTextureTransform(
+        textureView: TextureView,
+        previewSize: Size,
+        cameraInfo: CameraHardwareInfo
+    ) {
+        val viewWidth = textureView.width
+        val viewHeight = textureView.height
+        if (viewWidth == 0 || viewHeight == 0) return
+
+        val wm = context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+        val rotation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                context.display?.rotation ?: Surface.ROTATION_0
+            } catch (_: UnsupportedOperationException) {
+                wm?.defaultDisplay?.rotation ?: Surface.ROTATION_0
+            }
+        } else {
+            wm?.defaultDisplay?.rotation ?: Surface.ROTATION_0
+        }
+
+        val matrix = Matrix()
+        val viewRect = RectF(0f, 0f, viewWidth.toFloat(), viewHeight.toFloat())
+        val bufferRect = RectF(0f, 0f, previewSize.height.toFloat(), previewSize.width.toFloat())
+        val centerX = viewRect.centerX()
+        val centerY = viewRect.centerY()
+
+        // Center-crop preview cleanly without distorting aspect ratio
+        val sensorIsRotated = cameraInfo.sensorOrientationDeg == 90 || cameraInfo.sensorOrientationDeg == 270
+        val bufferW = if (sensorIsRotated && (rotation == Surface.ROTATION_0 || rotation == Surface.ROTATION_180)) {
+            previewSize.height.toFloat()
+        } else {
+            previewSize.width.toFloat()
+        }
+        val bufferH = if (sensorIsRotated && (rotation == Surface.ROTATION_0 || rotation == Surface.ROTATION_180)) {
+            previewSize.width.toFloat()
+        } else {
+            previewSize.height.toFloat()
+        }
+
+        if (Surface.ROTATION_90 == rotation || Surface.ROTATION_270 == rotation) {
+            bufferRect.offset(centerX - bufferRect.centerX(), centerY - bufferRect.centerY())
+            matrix.setRectToRect(viewRect, bufferRect, Matrix.ScaleToFit.FILL)
+            val scale = maxOf(
+                viewHeight.toFloat() / previewSize.height,
+                viewWidth.toFloat() / previewSize.width
+            )
+            matrix.postScale(scale, scale, centerX, centerY)
+            matrix.postRotate(90f * (rotation - 2), centerX, centerY)
+        } else {
+            val scaleX = viewWidth.toFloat() / bufferW
+            val scaleY = viewHeight.toFloat() / bufferH
+            val scale = maxOf(scaleX, scaleY)
+            matrix.setScale(
+                (bufferW * scale) / viewWidth.toFloat(),
+                (bufferH * scale) / viewHeight.toFloat(),
+                centerX,
+                centerY
+            )
+            if (Surface.ROTATION_180 == rotation) {
+                matrix.postRotate(180f, centerX, centerY)
+            }
+        }
+        textureView.setTransform(matrix)
+    }
+
+    private fun mapCameraError(errorCode: Int): Pair<String, Boolean> = when (errorCode) {
+        CameraDevice.StateCallback.ERROR_CAMERA_IN_USE ->
+            "Camera is occupied by another application. Close the other app and try again." to false
+        CameraDevice.StateCallback.ERROR_MAX_CAMERAS_IN_USE ->
+            "Maximum number of active cameras reached. Close other camera apps and retry." to false
+        CameraDevice.StateCallback.ERROR_CAMERA_DISABLED ->
+            "Camera access is disabled by device policy." to true
+        CameraDevice.StateCallback.ERROR_CAMERA_DEVICE ->
+            "Camera device encountered a hardware initialization error." to true
+        CameraDevice.StateCallback.ERROR_CAMERA_SERVICE ->
+            "Android camera service encountered an error. Restarting the camera may resolve it." to false
+        else ->
+            "Camera failed to initialize (code $errorCode)." to false
+    }
+
+    private fun logDebug(msg: String) {
+        if (BuildConfig.DEBUG) {
+            android.util.Log.d("WideQRCamera", msg)
+        }
+    }
+}

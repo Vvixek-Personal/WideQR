@@ -1,0 +1,6 @@
+{
+  "name": "WideQR",
+  "description": "Ultra-wide physical lens QR scanner, link redirect inspector, and UPI payment handler.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
