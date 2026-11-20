@@ -19,21 +19,26 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -50,6 +55,11 @@ fun SettingsScreen(
     onOpenDiagnostics: () -> Unit
 ) {
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
+    val allowFallback by viewModel.allowMainCameraFallback.collectAsStateWithLifecycle()
+    val saveProductBarcodes by viewModel.scanProductBarcodes.collectAsStateWithLifecycle()
+    val saveHistory by viewModel.saveScanHistory.collectAsStateWithLifecycle()
+    val historyEntries by remember { viewModel.scanHistory }
+        .collectAsStateWithLifecycle(initialValue = emptyList())
 
     Scaffold(
         topBar = {
@@ -137,6 +147,76 @@ fun SettingsScreen(
                     }
                 }
 
+                // Scanner Behaviour
+                SettingsSection(title = stringResource(R.string.settings_scanner_behaviour)) {
+                    ToggleRow(
+                        label = stringResource(R.string.settings_main_camera_fallback),
+                        description = stringResource(R.string.settings_main_camera_fallback_desc),
+                        checked = allowFallback,
+                        onCheckedChange = { viewModel.setAllowMainCameraFallback(it) },
+                        testTag = "settings_main_camera_fallback_toggle"
+                    )
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                    )
+                    ToggleRow(
+                        label = stringResource(R.string.settings_product_barcodes),
+                        description = stringResource(R.string.settings_product_barcodes_desc),
+                        checked = saveProductBarcodes,
+                        onCheckedChange = { viewModel.setScanProductBarcodes(it) },
+                        testTag = "settings_product_barcodes_toggle"
+                    )
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                    )
+                    ToggleRow(
+                        label = stringResource(R.string.settings_scan_history),
+                        description = stringResource(R.string.settings_scan_history_desc),
+                        checked = saveHistory,
+                        onCheckedChange = { viewModel.setSaveScanHistory(it) },
+                        testTag = "settings_scan_history_toggle"
+                    )
+                    if (saveHistory) {
+                        HorizontalDivider(
+                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(onClick = { viewModel.clearScanHistory() })
+                                .padding(horizontal = 16.dp, vertical = 14.dp)
+                                .testTag("settings_clear_history_button"),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Delete,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                            Text(
+                                text = stringResource(R.string.settings_history_clear),
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                        Text(
+                            text = if (historyEntries.isEmpty()) {
+                                stringResource(R.string.settings_history_empty)
+                            } else {
+                                pluralStringResource(
+                                    R.plurals.settings_history_count,
+                                    historyEntries.size,
+                                    historyEntries.size
+                                )
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+
                 // Privacy
                 SettingsSection(title = stringResource(R.string.settings_privacy)) {
                     Text(
@@ -195,6 +275,42 @@ private fun SettingsSection(
         ) {
             content()
         }
+    }
+}
+
+@Composable
+private fun ToggleRow(
+    label: String,
+    description: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    testTag: String
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .padding(horizontal = 16.dp, vertical = 14.dp)
+            .semantics(mergeDescendants = true) {}
+            .testTag(testTag),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.titleSmall
+            )
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange
+        )
     }
 }
 

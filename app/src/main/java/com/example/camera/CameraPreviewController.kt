@@ -4,14 +4,17 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.ImageFormat
 import android.graphics.Matrix
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraAccessException
 import android.hardware.camera2.CameraCaptureSession
+import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.params.MeteringRectangle
 import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
 import android.media.Image
@@ -192,6 +195,18 @@ class CameraPreviewController(
             return
         }
 
+        // Cache sensor metering geometry for tap-to-meter (AE/AF regions).
+        try {
+            val chars = cameraManager?.getCameraCharacteristics(cameraInfo.openCameraId)
+            activeArraySize = chars?.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+            maxAeRegions = chars?.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AE) ?: 1
+            maxAfRegions = chars?.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AF) ?: 0
+        } catch (_: Exception) {
+            activeArraySize = null
+            maxAeRegions = 1
+            maxAfRegions = 0
+        }
+
         val previewSize = PhysicalCameraSelector.choosePreviewSize(cameraInfo.previewSizes)
         currentPreviewSize = previewSize
         surfaceTexture.setDefaultBufferSize(previewSize.width, previewSize.height)
@@ -322,6 +337,82 @@ class CameraPreviewController(
                 "Ultra-wide camera stream could not be initialized.",
                 isAccessLimitation = true
             )
+        }
+    }
+
+    /**
+     * Tap-to-meter: maps a TextureView tap to a sensor metering region.
+     * Always sets AE (exposure) regions — this is the only meaningful control on
+     * fixed-focus ultra-wide lenses (CONTROL_AF_MODE_OFF). AF regions + trigger are
+     * only applied when the lens reports autofocus support and AF regions > 0.
+     * Returns true when a metering request was applied.
+     */
+    fun focusOnTap(x: Float, y: Float, viewWidth: Int, viewHeight: Int): Boolean {
+        val info = currentCamera ?: return false
+        val session = captureSession ?: return false
+        val builder = previewRequestBuilder ?: return false
+        val handler = backgroundHandler ?: return false
+        val array = activeArraySize ?: return false
+        if (viewWidth <= 0 || viewHeight <= 0 || array.width() <= 0 || array.height() <= 0) {
+            return false
+        }
+        return try {
+            val sensorX = (array.left + (x / viewWidth.toFloat()) * array.width()).toInt()
+            val sensorY = (array.top + (y / viewHeight.toFloat()) * array.height()).toInt()
+            val half = maxOf(array.width(), array.height()) / 10
+            val region = Rect(
+                (sensorX - half).coerceIn(array.left, array.right),
+                (sensorY - half).coerceIn(array.top, array.bottom),
+                (sensorX + half).coerceIn(array.left, array.right),
+                (sensorY + half).coerceIn(array.top, array.bottom)
+            )
+            if (region.width() <= 0 || region.height() <= 0) return false
+
+            val metering = MeteringRectangle(region, MeteringRectangle.METERING_WEIGHT_MAX)
+            if (maxAeRegions > 0) {
+                builder.set(
+                    CaptureRequest.CONTROL_AE_REGIONS,
+                    arrayOf(metering)
+                )
+            }
+            // AF regions only apply to a camera opened as a standalone device.
+            // Logical/physical streams would need physical-camera keys, and
+            // fixed-focus ultra-wides report no AF support at all.
+            val canFocus = info.supportsAutofocus &&
+                !info.isFixedFocus &&
+                info.physicalCameraId == null &&
+                maxAfRegions > 0
+            if (canFocus) {
+                builder.set(
+                    CaptureRequest.CONTROL_AF_REGIONS,
+                    arrayOf(metering)
+                )
+                builder.set(
+                    CaptureRequest.CONTROL_AF_TRIGGER,
+                    CameraMetadata.CONTROL_AF_TRIGGER_START
+                )
+            }
+            session.setRepeatingRequest(builder.build(), null, handler)
+
+            if (canFocus) {
+                // Release the AF lock so continuous focus resumes for scanning.
+                val release = Runnable {
+                    try {
+                        val current = previewRequestBuilder ?: return@Runnable
+                        current.set(
+                            CaptureRequest.CONTROL_AF_TRIGGER,
+                            CameraMetadata.CONTROL_AF_TRIGGER_IDLE
+                        )
+                        captureSession?.setRepeatingRequest(current.build(), null, handler)
+                    } catch (_: Exception) {
+                    }
+                }
+                handler.postDelayed(release, AF_RELEASE_DELAY_MS)
+            }
+            true
+        } catch (e: Exception) {
+            logDebug("Tap-to-meter failed: ${e.message}")
+            false
         }
     }
 
@@ -548,5 +639,10 @@ class CameraPreviewController(
         if (BuildConfig.DEBUG) {
             android.util.Log.d("WideQRCamera", msg)
         }
+    }
+
+    private companion object {
+        /** Time to hold an AF lock after a tap before returning to continuous AF. */
+        const val AF_RELEASE_DELAY_MS = 2_500L
     }
 }

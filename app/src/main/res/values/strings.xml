@@ -43,6 +43,7 @@
     <string name="scanner_permission_blocked_title">Enable Camera in Settings</string>
     <string name="scanner_action_gallery_fallback">Scan QR from Gallery</string>
     <string name="scanner_lens_label">Ultra-wide</string>
+    <string name="action_enable_main_camera_fallback">Scan with the 1x main camera instead</string>
 
     <!-- Camera Permissions & Hardware Errors -->
     <string name="permission_title">Camera Permission Needed</string>
@@ -59,6 +60,7 @@
     <string name="label_raw_payload">Raw QR Data</string>
     <string name="action_copy">Copy</string>
     <string name="copied_to_clipboard">Copied to clipboard</string>
+    <string name="sensitive_clip_cleared">Sensitive value cleared from clipboard</string>
 
     <!-- URL / Redirect Inspection -->
     <string name="label_qr_link">QR LINK</string>
@@ -125,7 +127,25 @@
     <string name="settings_camera_diagnostics">Camera Diagnostics</string>
     <string name="settings_camera_diagnostics_desc">Inspect Camera2 physical IDs, focal lengths, and sensor metadata</string>
     <string name="settings_privacy">Privacy</string>
-    <string name="settings_privacy_desc">All QR decoding runs locally on your device. Camera frames are never uploaded, no scan history is saved, and there are no ads, accounts, or analytics. Network requests happen only if you tap Inspect Redirects or open a link.</string>
+    <string name="settings_privacy_desc">All QR decoding runs locally on your device. Camera frames are never uploaded, and there are no ads, accounts, or analytics. Network requests happen only if you tap Inspect Redirects or open a link. Scan history is off by default — if you turn it on, results are stored only on this device and you can clear them at any time.</string>
+    <string name="settings_scanner_behaviour">Scanner Behaviour</string>
+    <string name="settings_main_camera_fallback">Allow 1x main camera fallback</string>
+    <string name="settings_main_camera_fallback_desc">When the ultra-wide lens is locked by firmware, scan with the standard 1x main camera instead. The scanner will clearly label this as a fallback, and images will be less sharp — your ultra-wide is still preferred whenever it is available.</string>
+    <string name="settings_product_barcodes">Scan product &amp; 1D barcodes</string>
+    <string name="settings_product_barcodes_desc">Also decode EAN, UPC, Code 128, Code 39, ITF, Data Matrix and Aztec codes. Off by default because wider format scanning adds latency on low-RAM devices.</string>
+    <string name="settings_scan_history">Save scan history</string>
+    <string name="settings_scan_history_desc">Keep the codes you scan in a local on-device list. Nothing is uploaded, and you can clear everything at once.</string>
+    <string name="settings_history_clear">Clear scan history</string>
+    <string name="settings_history_cleared">Scan history cleared</string>
+    <string name="settings_history_empty">No saved scans yet</string>
+    <string name="badge_main_camera_fallback">Main camera fallback</string>
+    <string name="badge_main_camera_fallback_desc">Scanning with the 1x main camera. Move closer and keep the code flat for a reliable read.</string>
+    <string name="cd_tap_to_focus">Tap the preview to set exposure focus point</string>
+    <string name="tap_to_meter_applied">Exposure metered at tap point</string>
     <string name="settings_about">About WideQR</string>
     <string name="settings_about_desc">WideQR prioritizes genuine physical ultra-wide lens access via Camera2 without digital zoom tricks. On devices whose firmware restricts secondary sensors from third-party apps, WideQR reports that limitation honestly.</string>
+    <plurals name="settings_history_count">
+        <item quantity="one">%1$d saved scan</item>
+        <item quantity="other">%1$d saved scans</item>
+    </plurals>
 </resources>

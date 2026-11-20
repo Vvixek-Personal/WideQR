@@ -26,13 +26,53 @@ class QRDecoder {
         }
     }
 
-    private val options = BarcodeScannerOptions.Builder()
-        .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
-        .setExecutor(callbackExecutor)
-        .build()
+    @Volatile
+    private var productBarcodesEnabled: Boolean = false
+
+    @Volatile
+    private var options: BarcodeScannerOptions = buildOptions(productBarcodesEnabled)
 
     @Volatile
     private var scannerInstance: BarcodeScanner? = null
+
+    private fun buildOptions(includeProductBarcodes: Boolean): BarcodeScannerOptions {
+        val builder = BarcodeScannerOptions.Builder()
+            .setExecutor(callbackExecutor)
+        if (includeProductBarcodes) {
+            builder.setBarcodeFormats(
+                Barcode.FORMAT_QR_CODE,
+                Barcode.FORMAT_EAN_13,
+                Barcode.FORMAT_EAN_8,
+                Barcode.FORMAT_UPC_A,
+                Barcode.FORMAT_UPC_E,
+                Barcode.FORMAT_CODE_128,
+                Barcode.FORMAT_CODE_39,
+                Barcode.FORMAT_ITF,
+                Barcode.FORMAT_DATA_MATRIX,
+                Barcode.FORMAT_AZTEC
+            )
+        } else {
+            builder.setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+        }
+        return builder.build()
+    }
+
+    /**
+     * Switches between QR-only (default, lowest latency on 4 GB RAM devices) and
+     * QR + product/1D barcodes. Recreates the ML Kit client when the mode changes.
+     */
+    fun setProductBarcodesEnabled(enabled: Boolean) {
+        if (productBarcodesEnabled == enabled) return
+        productBarcodesEnabled = enabled
+        synchronized(this) {
+            options = buildOptions(enabled)
+            try {
+                scannerInstance?.close()
+            } catch (_: Exception) {
+            }
+            scannerInstance = null
+        }
+    }
 
     private fun getOrCreateScanner(): BarcodeScanner? {
         scannerInstance?.let { return it }

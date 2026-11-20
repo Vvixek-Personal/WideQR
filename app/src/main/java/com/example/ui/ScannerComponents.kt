@@ -586,7 +586,9 @@ internal fun ScannerRecoveryPanel(
     onOpenAppSettings: () -> Unit,
     onOpenDiagnostics: () -> Unit,
     onScanGallery: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    fallbackAllowed: Boolean = false,
+    onEnableFallback: () -> Unit = {}
 ) {
     val isNoUltraWide = hasCameraPermission &&
         discoveryReport.status == VerificationStatus.NO_ULTRA_WIDE_CAMERA_FOUND &&
@@ -732,6 +734,26 @@ internal fun ScannerRecoveryPanel(
                     Text(
                         text = stringResource(R.string.action_inspect_hardware),
                         fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+
+            // Discoverability for the opt-in 1x fallback. Only offered when the
+            // ultra-wide is genuinely unusable — never as a silent substitution.
+            if (hasCameraPermission && !fallbackAllowed && (isNoUltraWide || isInaccessible)) {
+                TextButton(
+                    onClick = onEnableFallback,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .testTag("enable_main_camera_fallback_button"),
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = InstrumentWarning
+                    )
+                ) {
+                    Text(
+                        text = stringResource(R.string.action_enable_main_camera_fallback),
+                        style = MaterialTheme.typography.labelLarge
                     )
                 }
             }

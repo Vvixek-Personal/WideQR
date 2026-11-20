@@ -1,8 +1,6 @@
 package com.example.ui
 
 import android.content.ActivityNotFoundException
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -107,11 +105,28 @@ fun ResultScreen(
         }
     }
 
-    fun copyText(label: String, value: String) {
-        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-        clipboard?.setPrimaryClip(ClipData.newPlainText(label, value))
-        scope.launch {
-            snackbarHostState.showSnackbar(context.getString(R.string.copied_to_clipboard))
+    fun copyText(label: String, value: String, sensitive: Boolean = false) {
+        val copied = SecureClipboard.copy(
+            context = context,
+            label = label,
+            value = value,
+            sensitive = sensitive,
+            onAutoCleared = if (sensitive) {
+                {
+                    scope.launch {
+                        snackbarHostState.showSnackbar(
+                            context.getString(R.string.sensitive_clip_cleared)
+                        )
+                    }
+                }
+            } else {
+                null
+            }
+        )
+        if (copied) {
+            scope.launch {
+                snackbarHostState.showSnackbar(context.getString(R.string.copied_to_clipboard))
+            }
         }
     }
 
@@ -185,9 +200,9 @@ fun ResultScreen(
                     is ScanResult.UpiResult -> UpiResultSection(
                         result = result,
                         onOpenUpiApp = { UPIIntentHandler.openInUpiApp(context, result.upiData.rawUri) },
-                        onCopyUpiId = { id -> copyText("UPI ID", id) },
-                        onCopyPaymentLink = { link -> copyText("UPI Payment Link", link) },
-                        onCopyDetails = { details -> copyText("UPI Details", details) }
+                        onCopyUpiId = { id -> copyText("UPI ID", id, sensitive = true) },
+                        onCopyPaymentLink = { link -> copyText("UPI Payment Link", link, sensitive = true) },
+                        onCopyDetails = { details -> copyText("UPI Details", details, sensitive = true) }
                     )
 
                     is ScanResult.UrlResult -> UrlResultSection(
@@ -207,8 +222,8 @@ fun ResultScreen(
 
                     is ScanResult.WifiResult -> WifiResultSection(
                         result = result,
-                        onCopyPassword = { pw -> copyText("Wi-Fi Password", pw) },
-                        onCopyCredentials = { creds -> copyText("Wi-Fi Credentials", creds) }
+                        onCopyPassword = { pw -> copyText("Wi-Fi Password", pw, sensitive = true) },
+                        onCopyCredentials = { creds -> copyText("Wi-Fi Credentials", creds, sensitive = true) }
                     )
 
                     is ScanResult.ContactResult -> ContactResultSection(

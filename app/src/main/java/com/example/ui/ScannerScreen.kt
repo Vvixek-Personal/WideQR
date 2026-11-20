@@ -13,6 +13,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,11 +27,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -39,6 +47,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -53,6 +65,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.camera.CameraSessionState
+import com.example.models.ScannerTarget
+import com.example.models.VerificationStatus
 import com.example.ui.theme.InstrumentAccent
 import com.example.ui.theme.InstrumentBackground
 import com.example.ui.theme.InstrumentBorder
@@ -88,6 +102,7 @@ fun ScannerScreen(
 
     val textureViewRef = remember { mutableStateOf<TextureView?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
+    val tapToFocusDescription = stringResource(R.string.cd_tap_to_focus)
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -196,14 +211,39 @@ fun ScannerScreen(
         }
     }
 
+    val scannerTarget by viewModel.scannerTarget.collectAsStateWithLifecycle()
+    val allowFallback by viewModel.allowMainCameraFallback.collectAsStateWithLifecycle()
+
     val canStreamUltraWide = hasCameraPermission &&
-        discoveryReport.status.isUsableForScanner &&
+        scannerTarget != ScannerTarget.Unavailable &&
         sessionState !is CameraSessionState.Error
+
+    val isFallback = scannerTarget.isFallback
+
+    // Fallback sessions borrow the main camera; the toolbar reads selected camera
+    // features (flash etc.) from the report, so substitute the active lens.
+    val activeReport = remember(discoveryReport, scannerTarget) {
+        val activeLens = scannerTarget.cameraInfo
+        if (isFallback && activeLens != null) {
+            discoveryReport.copy(
+                status = VerificationStatus.WIDE_CAMERA_DETECTED_UNVERIFIED,
+                selectedUltraWide = activeLens
+            )
+        } else {
+            discoveryReport
+        }
+    }
+
+    // Re-resolve the lens when the fallback preference changes so the preview
+    // switches (or un-switches) immediately instead of on the next resume.
+    LaunchedEffect(allowFallback) {
+        viewModel.onFallbackPreferenceChanged()
+    }
 
     val isStreaming = canStreamUltraWide && sessionState is CameraSessionState.Streaming
     val isOpening = canStreamUltraWide && sessionState is CameraSessionState.Opening
     val hasErrorState = hasCameraPermission &&
-        (!discoveryReport.status.isUsableForScanner || sessionState is CameraSessionState.Error)
+        (scannerTarget == ScannerTarget.Unavailable || sessionState is CameraSessionState.Error)
 
     Scaffold(
         snackbarHost = {
@@ -232,7 +272,8 @@ fun ScannerScreen(
         containerColor = InstrumentBackground
     ) { _ ->
         Box(modifier = Modifier.fillMaxSize()) {
-            // 1. Full-bleed live physical ultra-wide Camera2 TextureView
+            // 1. Full-bleed live physical ultra-wide Camera2 TextureView.
+            //    Taps map to an exposure/AF metering region (tap-to-meter).
             if (canStreamUltraWide) {
                 AndroidView(
                     factory = { ctx ->
@@ -241,7 +282,22 @@ fun ScannerScreen(
                             viewModel.startScannerPreview(tv)
                         }
                     },
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .semantics {
+                            contentDescription = tapToFocusDescription
+                        }
+                        .pointerInput(Unit) {
+                            detectTapGestures { offset ->
+                                val tv = textureViewRef.value ?: return@detectTapGestures
+                                viewModel.focusOnTap(
+                                    x = offset.x,
+                                    y = offset.y,
+                                    viewWidth = tv.width,
+                                    viewHeight = tv.height
+                                )
+                            }
+                        }
                 )
             }
 
@@ -292,7 +348,9 @@ fun ScannerScreen(
                             },
                             onOpenDiagnostics = onOpenDiagnostics,
                             onScanGallery = launchGalleryPicker,
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier.fillMaxSize(),
+                            fallbackAllowed = allowFallback,
+                            onEnableFallback = { viewModel.setAllowMainCameraFallback(true) }
                         )
                     }
                 }
@@ -302,12 +360,17 @@ fun ScannerScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    if (canStreamUltraWide) {
+                    if (isFallback) {
+                        MainCameraFallbackBadge()
+                    }
+                    if (canStreamUltraWide && !isFallback) {
                         ScannerHardwarePill(report = discoveryReport)
                     }
 
+                    // In fallback mode the discovery report has no ultra-wide selection,
+                    // so describe the lens that is actually driving the session.
                     ScannerBottomToolbar(
-                        report = discoveryReport,
+                        report = activeReport,
                         sessionState = sessionState,
                         hasCameraPermission = hasCameraPermission,
                         isGalleryDecoding = isGalleryDecoding,
@@ -319,6 +382,46 @@ fun ScannerScreen(
 
             if (isGalleryDecoding) {
                 ScannerGalleryDecodingOverlay(modifier = Modifier.fillMaxSize())
+            }
+        }
+    }
+}
+
+/**
+ * Unambiguous badge shown whenever the scanner is NOT using a genuine ultra-wide
+ * lens. Required by design: the 1x fallback must never look like ultra-wide.
+ */
+@Composable
+private fun MainCameraFallbackBadge(modifier: Modifier = Modifier) {
+    Surface(
+        color = InstrumentSurface,
+        contentColor = InstrumentTextPrimary,
+        shape = RoundedCornerShape(999.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary),
+        modifier = modifier.semantics(mergeDescendants = true) {}
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Filled.WarningAmber,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.tertiary,
+                modifier = Modifier.size(18.dp)
+            )
+            Column {
+                Text(
+                    text = stringResource(R.string.badge_main_camera_fallback),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.tertiary
+                )
+                Text(
+                    text = stringResource(R.string.badge_main_camera_fallback_desc),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = InstrumentTextPrimary.copy(alpha = 0.75f)
+                )
             }
         }
     }
